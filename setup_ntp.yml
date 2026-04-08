@@ -1,0 +1,35 @@
+# Archivo setup_ntp.yml
+---
+- name: Sincronizar relojes de los nodos mediante NTP
+  hosts: all
+  become: yes
+  tasks:
+    - name: Configurar servidor NTP
+      lineinfile:
+        path: /etc/chrony.conf
+        regexp: '^server '
+        line: "server dockreg.aclus.ac.uma.es iburst"
+        state: present
+      notify: reiniciar chrony
+
+    - name: Asegurar que otros servidores pool no interfieran (opcional)
+      lineinfile:
+        path: /etc/chrony.conf
+        regexp: '^pool '
+        state: absent
+
+    - name: Asegurar que chronyd esté arrancado y habilitado
+      service:
+        name: chronyd
+        state: started
+        enabled: yes
+
+    - name: Forzar sincronización inmediata (makestep)
+      command: chronyc makestep
+      changed_when: false
+
+  handlers:
+    - name: reiniciar chrony
+      service:
+        name: chronyd
+        state: restarted
