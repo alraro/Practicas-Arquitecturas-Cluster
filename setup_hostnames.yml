@@ -1,0 +1,21 @@
+# Archivo: setup_hostnames.yml
+---
+- hosts: all
+  become: yes
+  tasks:
+    - name: Calcular sufijo de IP y aplicar Hostname
+      shell: |
+        # Extraemos el 3er y 4º octeto de la IP definida en el inventario
+        P3=$(echo "{{ ansible_host }}" | awk -F. '{printf "%02d", $3 %100}')
+        P4=$(echo {{ ansible_host }} | cut -d. -f4)
+        # Formateamos con ceros a la izquierda (printf)
+        SUFFIX=$(printf "%02d-%03d" $P3 $P4)
+        NEW_HOSTNAME="{{ base_name }}-$SUFFIX"
+        # Aplicamos el cambio en Alpine
+        echo "$NEW_HOSTNAME" > /etc/hostname
+        hostname -F /etc/hostname
+      register: hostname_result
+
+    - name: Mostrar nuevo nombre configurado
+      debug:
+        msg: "El nuevo nombre de la máquina es {{ base_name }}-{{ '%02d' | format(ansible_host.split('.')[2] | int) }}-{{ '%03d' | format(ansible_host.split('.')[3] | int) }}"
