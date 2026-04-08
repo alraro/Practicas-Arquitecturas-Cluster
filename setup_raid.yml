@@ -1,0 +1,17 @@
+# Archivo: setup_raid.yml
+---
+- hosts: target_nodes
+  become: yes
+  tasks:
+    - name: Crear tabla de particiones y partición única en cada disco
+      parted:
+        device: "/dev/{{ item }}"
+        number: 1
+        state: present
+        label: msdos
+        part_type: primary
+      loop: [sdb, sdc, sdd, sde]
+    - name: Crear RAID 5 (SAN) usando las particiones sdb1-sde1
+      shell: mdadm --create --verbose /dev/md/raid_gfs2 --level=5 --raid-devices=4 --chunk=512K --bitmap=none /dev/sdb1 /dev/sdc1 /dev/sdd1 /dev/sde1
+      args:
+        creates: /dev/md/raid_gfs2
