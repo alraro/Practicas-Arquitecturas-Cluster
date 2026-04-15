@@ -1,0 +1,36 @@
+# Archivo: setup_iscsi.yml
+---
+- hosts: target_nodes
+  become: yes
+  tasks:
+    - name: Iniciar y habilitar el servicio target
+      systemd:
+        name: target
+        state: started
+        enabled: yes
+    - name: Configurar Target iSCSI vía Shell de TargetCLI
+      shell: |
+        # Definir Backstores (Modo Block para seguridad)
+        targetcli /backstores/block create name=gfs2_lun dev=/dev/vg_san/lv_san_gfs2
+
+        # Crear el Target IQN del Servidor
+        # targetSS-XXX (Calculado dinámicamente)
+        P3=$(echo "{{ ansible_host }}" | awk -F. '{printf "%02d", $3 %100}')
+        P4=$(echo "{{ ansible_host }}" | awk -F. '{printf "%03d", $4}')
+        IQN_SERVER="iqn.2026-01.es.uma.storage:target${P3}-${P4}"
+
+        targetcli /iscsi create $IQN_SERVER
+
+        # Crear LUN
+        targetcli /iscsi/$IQN_SERVER/tpg1/luns create /backstores/block/gfs2_lun
+
+        # Crear ACLs
+        # Sustituir por los IQNs de los clientes
+        targetcli /iscsi/$IQN_SERVER/tpg1/acls create iqn.2026-01.es.uma.storage:storage73-172
+        targetcli /iscsi/$IQN_SERVER/tpg1/acls create iqn.2026-01.es.uma.storage:storage73-173
+        targetcli /iscsi/$IQN_SERVER/tpg1/acls create iqn.2026-01.es.uma.storage:storage73-174
+
+        # ACL adicional para corrección
+        targetcli /iscsi/$IQN_SERVER/tpg1/acls create iqn.2026-01.es.uma.storage:storage73-009
+
+        targetcli saveconfig
