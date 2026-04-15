@@ -1,0 +1,21 @@
+# Archivo: setup_lvm.yml
+---
+- hosts: target_nodes
+  become: yes
+  tasks:
+    - name: Crear PV con alineamiento óptimo para el RAID
+      shell: pvcreate -v --dataalignment 1536k /dev/md/raid_gfs2
+      args:
+        creates: /dev/md/raid_gfs2
+
+    - name: Crear VG
+      lvg:
+        vg: vg_san
+        pvs: /dev/md/raid_gfs2
+
+    - name: Crear LV
+      lvol:
+        vg: vg_san
+        lv: lv_san_gfs2
+        size: 2.9G
+        opts: "-r auto"
