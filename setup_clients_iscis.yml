@@ -1,0 +1,57 @@
+---
+- hosts: storage_nodes
+  become: yes
+  vars:
+    iscsi_server_ip: "192.168.173.171"
+    target_iqn: "iqn.2026-01.es.uma.storage:target73-171"
+  tasks:
+    - name: Generar variables para el IQN
+      set_fact:
+        third_octet: "{{ ansible_default_ipv4.address.split('.')[2][-2:] }}"
+        fourth_octet: "{{ '%03d' | format(ansible_default_ipv4.address.split('.')[3] | int) }}"
+
+    - name: Configurar el InitiatorName (IQN)
+      copy:
+        content: "InitiatorName=iqn.2026-01.es.uma.storage:storage{{ third_octet }}-{{ fourth_octet }}\n"
+        dest: /etc/iscsi/initiatorname.iscsi
+      register: initiator_file
+      notify:
+        - Reiniciar servicios iscsi
+
+    - name: Configurar node.startup en iscsid.conf
+      lineinfile:
+        path: /etc/iscsi/iscsid.conf
+        regexp: "^node.startup ="
+        line: "node.startup = automatic"
+      notify:
+        - Reiniciar servicios iscsi
+
+    - name: Asegurar que los servicios estén habilitados
+      service:
+        name: "{{ item }}"
+        enabled: yes
+        state: started
+      loop:
+        - iscsid
+        - iscsi
+    - name: Aplicar cambios de configuración ahora
+      meta: flush_handlers
+
+    - name: Descubrir el Target para poblar la base de datos local
+      command: "iscsiadm -m discovery -t sendtargets -p {{ iscsi_server_ip }}"
+      changed_when: true
+
+    - name: Realizar login en el Target
+      open_iscsi:
+        portal: "{{ iscsi_server_ip }}"
+        target: "{{ target_iqn }}"
+        login: yes
+
+  handlers:
+    - name: Reiniciar servicios iscsi
+      service:
+        name: "{{ item }}"
+        state: restarted
+      loop:
+        - iscsid
+        - iscsi
