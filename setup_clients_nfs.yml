@@ -1,0 +1,33 @@
+# Archivo setup_clients_nfs.yml
+---
+- name: Configuración de Clientes NFS
+  hosts: compute_nodes
+  become: true
+  vars:
+    nfs_server_ip: "192.168.173.180" # IP HA
+    nfs_export_path: "/mnt/gfs2_storage" # Ruta en los nodos storage
+    nfs_mount_point: "/mnt/nfs_storage"
+
+  tasks:
+    - name: Crear el punto de montaje
+      file:
+        path: "{{ nfs_mount_point }}"
+        state: directory
+        mode: "0755"
+    - name: Montar NFS de forma persistente (fstab)
+      mount:
+        path: "{{ nfs_mount_point }}"
+        src: "{{ nfs_server_ip }}:{{ nfs_export_path }}"
+        fstype: nfs
+        # Usamos '_netdev' para que no intente montar si no hay red al arrancar
+        opts: "defaults,_netdev,rw,sync"
+        state: mounted
+
+    - name: Verificar el estado del montaje
+      command: df -h {{ nfs_mount_point }}
+      register: nfs_check
+      changed_when: false
+
+    - name: Resumen del montaje
+      debug:
+        msg: "NFS montado en {{ inventory_hostname }}: {{ nfs_check.stdout }}"
