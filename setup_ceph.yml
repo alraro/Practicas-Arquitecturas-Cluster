@@ -1,0 +1,111 @@
+# Archivo: setup_ceph.yml
+---
+- name: Configuración y Despliegue de Ceph Cluster
+  hosts: storage_nodes
+  become: true
+  vars:
+    initial_dashboard_password: "TuPasswordSeguro123"
+    proxy_quay_url: "dockreg.aclus.ac.uma.es:5001"
+    ceph_image: "quay.io/ceph/ceph:v17"
+
+  tasks:
+    # CONFIGURACIÓN DE PROXY
+    - name: Configurar mirror de Quay.io en todos los nodos de storage
+      copy:
+        dest: /etc/containers/registries.conf
+        content: |
+          unqualified-search-registries = ["quay.io"]
+
+          [[registry]]
+          location = "quay.io"
+          [[registry.mirror]]
+          location = "{{ proxy_quay_url }}"
+          insecure = true
+    - name: Asegurar que chronyd esté activo (Requisito de Ceph)
+      service:
+        name: chronyd
+        state: started
+        enabled: yes
+
+    - name: Capturar el hostname real de la máquina
+      command: hostname
+      register: real_hostname
+      changed_when: false
+
+    - name: Limpiar el disco sdb a conciencia (por si por error si ha escrito algo)
+      shell: |
+        wipefs -a /dev/sdb
+        sgdisk --zap-all /dev/sdb
+        dd if=/dev/zero of=/dev/sdb bs=1M count=100
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['storage_nodes'] }}"
+
+    # BOOTSTRAP
+    - name: Ejecutar bootstrap del cluster
+      command: >
+        cephadm --image {{ ceph_image }} bootstrap --mon-ip {{
+        hostvars['storage01']['ansible_host'] }} --initial-dashboard-user admin
+        --initial-dashboard-password {{ initial_dashboard_password }}
+        --allow-overwrite
+      args:
+        creates: /etc/ceph/ceph.conf
+      when: inventory_hostname == "storage01"
+
+    - name: Desactivar stack de monitoreo (Grafana/Prometheus) para ahorrar espacio
+      shell: |
+        ceph orch rm prometheus
+        ceph orch rm grafana
+        ceph orch rm alertmanager
+      when: inventory_hostname == "storage01"
+
+    - name: Ajustar umbrales de espacio
+      shell: |
+        ceph config set global mon_data_avail_warn 3
+        ceph config set global mon_data_avail_crit 2
+      when: inventory_hostname == "storage01"
+
+    # GESTIÓN DE LLAVES (SSH TRUST)
+    - name: Leer llave pública de Ceph
+      slurp:
+        src: /etc/ceph/ceph.pub
+      register: ceph_pub_key
+      when: inventory_hostname == "storage01"
+
+    - name: Distribuir la llave pública a todos los nodos de storage
+      authorized_key:
+        user: root
+        key: "{{ hostvars['storage01']['ceph_pub_key']['content'] | b64decode }}"
+
+    # EXPANSIÓN DEL CLUSTER
+    - name: Agregar nodos adicionales al orquestador
+      command: "ceph orch host add {{ hostvars[item]['real_hostname']['stdout'] }} {{
+        hostvars[item]['ansible_host'] }}"
+      loop: "{{ groups['storage_nodes'] | reject('equalto', 'storage01') | list }}"
+      when: inventory_hostname == "storage01"
+
+    - name: Convertir todos los nodos en administradores (distribuir llaves y config)
+      command: "ceph orch host label add {{ hostvars[item]['real_hostname']['stdout']
+        }} _admin"
+      loop: "{{ groups['storage_nodes'] }}"
+      when: inventory_hostname == "storage01"
+
+    # ALMACENAMIENTO (OSDs)
+    - name: Esperar a que los nodos estén sincronizados
+      pause:
+        seconds: 30
+
+    - name: Desplegar OSDs en /dev/sdb
+      command: "ceph orch daemon add osd {{ hostvars[item]['real_hostname']['stdout']
+        }}:/dev/sdb"
+      loop: "{{ groups['storage_nodes'] }}"
+      when: inventory_hostname == "storage01"
+
+    - name: Mostrar estado final del cluster
+      command: ceph status
+      register: ceph_state
+      when: inventory_hostname == "storage01"
+
+    - name: Imprimir resumen
+      debug:
+        var: ceph_state.stdout_lines
+      when: inventory_hostname == "storage01"
