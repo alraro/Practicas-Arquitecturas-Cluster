@@ -1,0 +1,32 @@
+# Archivo: setup_ha.yml
+---
+- hosts: storage_nodes
+  become: yes
+  vars:
+    virtual_ip_address: "192.168.173.180"
+    cluster_fs_resource: "cluster_fs-clone"
+
+  tasks:
+    - name: Crear o Actualizar el recurso de IP Virtual (VIP)
+      shell: |
+        if pcs resource status virtual_ip > /dev/null 2>&1; then
+          pcs resource update virtual_ip ip="{{ virtual_ip_address }}"
+        else
+          pcs resource create virtual_ip ocf:heartbeat:IPaddr2 \
+            ip="{{ virtual_ip_address }}" cidr_netmask="24" \
+            op monitor interval=10s timeout=20s
+        fi
+      run_once: true
+    - name: Configurar la colocación de la VIP
+      shell: |
+        # La VIP debe estar donde esté el sistema de archivos montado
+        pcs constraint colocation add virtual_ip with {{ cluster_fs_resource }} --force
+      run_once: true
+    - name: Configurar el orden
+      shell: |
+        # No queremos que la IP responda hasta que el disco esté listo
+        pcs constraint order start {{ cluster_fs_resource }} then virtual_ip --force
+      run_once: true
+    - name: Limpieza de seguridad
+      command: "pcs resource cleanup"
+      run_once: true
