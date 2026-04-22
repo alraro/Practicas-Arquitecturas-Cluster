@@ -1,0 +1,32 @@
+# Archivo: setup_nfs_gateway.yml
+---
+- hosts: storage_nodes
+  become: yes
+  vars:
+    mount_path: "/mnt/gfs2_storage"
+
+  tasks:
+    - name: Configurar nodos a los que se exporta el NFS
+      copy:
+        dest: /etc/exports
+        content: |
+          {% for ip in nfs_client_ips %}
+          {{ mount_path }} {{ ip }}(rw,sync,no_root_squash,no_subtree_check,fsid=10)
+          {% endfor %}
+      vars:
+        # IPs de tus máquinas y la de corrección
+        nfs_client_ips:
+          - "192.168.173.175"
+          - "192.168.173.176"
+          - "192.168.173.177"
+          - "192.168.173.178"
+          - "192.168.173.9"
+
+    - name: Habilitar y arrancar servicios NFS
+      systemd:
+        name: nfs-server
+        state: started
+        enabled: yes
+
+    - name: Refrescar exportaciones
+      command: exportfs -ra
