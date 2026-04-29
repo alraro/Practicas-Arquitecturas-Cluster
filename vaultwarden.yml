@@ -1,0 +1,60 @@
+version: "3.8"
+networks:
+  vault-internal:
+    driver: overlay
+    driver_opts:
+      com.docker.network.driver.mtu: "1400"
+
+services:
+
+  # Servicio de Base de Datos en CEPH
+  vault-db:
+    image: mariadb
+    command: --skip-name-resolve
+    environment:
+      - MYSQL_ROOT_PASSWORD=vaultpass
+      - MYSQL_DATABASE=vaultdb
+      - MYSQL_USER=vaultuser
+      - MYSQL_PASSWORD=vaultpass
+    networks:
+      - vault-internal
+    volumes:
+      # Usamos CEPH por su robustez con BD
+      - /mnt/ceph_storage/vault/db:/var/lib/mysql
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: any
+
+  # Servidor de Vaultwarden en GFS2/NFS
+  vaultwarden:
+    image: vaultwarden/server:latest-alpine
+    ports:
+      - 8080:80
+      - 8443:443 # Añadimos el puerto HTTPS
+    networks:
+      - vault-internal
+    environment:
+      - DATABASE_URL=mysql://vaultuser:vaultpass@vault-db:3306/vaultdb
+      - SIGNUPS_ALLOWED=true
+    # Configuramos Vaultwarden para que use los certificados que vamos a generar
+      - ROCKET_TLS={certs="/data/cert.pem",key="/data/key.pem"}
+    volumes:
+      - /mnt/nfs_storage/vault/data:/data
+    # Este comando instala openssl, genera el certificado si no existe y arranca la app
+    command: >
+      sh -c "[ ! -f /data/cert.pem ] && openssl req -x509 -newkey rsa:4096 -keyout /data/key.pem -out /data/cert.pem -sha256 -days 365 -nodes -subj '/CN=localhost' || echo 'Certificado ya existente'; /start.sh"
+    deploy:
+      mode: replicated
+      replicas: 1
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: any
+    depends_on:
+      - vault-db
