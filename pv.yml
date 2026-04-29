@@ -1,0 +1,28 @@
+# Archivo ~/gitea/pv.yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: gitea-db-pv
+spec:
+  capacity:
+   storage: 1Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: manual
+  hostPath:
+    path: /mnt/ceph_storage/gitea/db
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: gitea-data-pv
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: manual
+  hostPath:
+    path: /mnt/nfs_storage/gitea/data
