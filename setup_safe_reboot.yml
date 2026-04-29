@@ -1,0 +1,84 @@
+# Archivo setup_safe_reboot.yml
+---
+- hosts: storage_nodes
+  become: yes
+
+  tasks:
+  - name: Crear el script de apagado limpio (Wrapper)
+    copy:
+      dest: /usr/local/bin/safe-reboot
+      owner: root
+      group: root
+      mode: '0755'
+      content: |
+        #!/bin/bash
+        # Entramos en root para que fuser no mate nuestra propia sesión
+        cd /root
+        echo "================================================"
+        echo " INICIANDO APAGADO SEGURO (CLÚSTER + CEPH) "
+        echo "================================================"
+
+        # Paso A: Evitar que Ceph rebalancee datos
+        /usr/bin/ceph osd set noout > /dev/null 2>&1
+
+        # Paso B: Intentar parada limpia de Pacemaker (20s)
+        timeout 20s /usr/sbin/pcs cluster stop
+
+        # Paso C: Si falla la parada limpia o el disco sigue montado, forzamos
+        if [ $? -ne 0 ] || mountpoint -q /mnt/gfs2_storage; then
+          echo "-> Bloqueo detectado. Forzando desmontaje y parada..."
+          umount -l /mnt/gfs2_storage # Desmontaje "perezoso"
+          systemctl stop pacemaker corosync dlm 2>/dev/null
+          echo "-> Reiniciando con fuerza bruta..."
+          /usr/sbin/reboot -f
+        else
+          echo "-> Todo limpio. Reiniciando normalmente..."
+          /usr/sbin/reboot
+        fi
+  - name: Aplicar alias permanente para root
+    lineinfile:
+      path: /root/.bashrc
+      line: "alias reboot='/usr/local/bin/safe-reboot'"
+      regexp: "^alias reboot="
+      state: present
+  
+  - name: Crear script de restauración de salud de Ceph
+    copy:
+      dest: /usr/local/bin/ceph-health-restore
+      owner: root
+      group: root
+      mode: '0755'
+      content: |
+        #!/bin/bash
+        echo "Esperando a que Ceph esté listo para quitar flags de mantenimiento..."
+        # Esperamos un poco para asegurar que los OSD locales han levantado
+        sleep 30
+
+        # Quitamos los bloqueos de rebalanceo
+        /usr/bin/ceph osd unset noout
+        /usr/bin/ceph osd unset norecover
+
+        echo "Ceph restaurado."
+
+  - name: Crear servicio Systemd para Ceph-Restore
+    copy:
+      dest: /etc/systemd/system/ceph-restore.service
+      content: |
+        [Unit]
+        Description=Restaurar flags de Ceph tras reinicio seguro
+        After=network-online.target ceph-osd.target
+        Wants=network-online.target
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/usr/local/bin/ceph-health-restore
+
+        [Install]
+        WantedBy=multi-user.target
+
+  - name: Habilitar el servicio de restauración automática
+    systemd:
+      name: ceph-restore
+      enabled: yes
+      daemon_reload: yes

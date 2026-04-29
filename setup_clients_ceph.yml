@@ -1,0 +1,60 @@
+# Archivo: setup_clients_ceph.yml
+---
+- name: Configuración del Sistema de Archivos y Clientes Ceph
+  hosts: all
+  become: true
+  vars:
+    cephfs_name: "cephfs"
+    mount_path: "/mnt/ceph_storage"
+    # IPs de los monitores para el montaje (Alta Disponibilidad)
+    mon_ips: "192.168.173.172:6789,192.168.173.173:6789,192.168.173.174:6789"
+
+  tasks:
+    # --- FASE 1: SERVIDOR (Ejecutar solo en storage01) ---
+    - name: Crear el volumen CephFS
+      command: "ceph fs volume create {{ cephfs_name }}"
+      register: fs_create
+      failed_when:
+        - fs_create.rc != 0
+        - "'already exists' not in fs_create.stderr"
+      when: inventory_hostname == "storage01"
+
+    - name: Obtener la llave de admin para los clientes
+      command: ceph auth get-key client.admin
+      register: ceph_admin_key
+      when: inventory_hostname == "storage01"
+
+    - name: Compartir la llave con los nodos compute
+      set_fact:
+        shared_ceph_key: "{{ ceph_admin_key.stdout }}"
+      delegate_to: "{{ item }}"
+      delegate_facts: true
+      loop: "{{ groups['compute_nodes'] }}"
+      when: inventory_hostname == "storage01"
+
+    # --- FASE 2: CLIENTES (Ejecutar en compute_nodes) ---
+    - name: Crear el punto de montaje
+      file:
+        path: "{{ mount_path }}"
+        state: directory
+        mode: "0755"
+      when: inventory_hostname in groups['compute_nodes']
+
+    - name: Montar CephFS de forma persistente (fstab)
+      mount:
+        path: "{{ mount_path }}"
+        src: "{{ mon_ips }}:/"
+        fstype: ceph
+        opts: "name=admin,secret={{ hostvars['storage01']['ceph_admin_key']['stdout'] }},_netdev,noatime"
+        state: mounted
+      when: inventory_hostname in groups['compute_nodes']
+
+    - name: Verificar montaje
+      command: df -h {{ mount_path }}
+      register: mount_check
+      when: inventory_hostname in groups['compute_nodes']
+
+    - name: Mostrar resultado del montaje
+      debug:
+        var: mount_check.stdout_lines
+      when: inventory_hostname in groups['compute_nodes']
