@@ -1,0 +1,55 @@
+# Archivo setup_k3s.yaml
+---
+- name: Configurar registry mirror y optimización de disco para k3s
+  hosts: compute_nodes
+  become: true
+  vars:
+    registry_url: "dockreg.aclus.ac.uma.es:5000"
+
+  tasks:
+    - name: Crear el directorio de configuración de k3s
+      ansible.builtin.file:
+        path: /etc/rancher/k3s
+        state: directory
+        mode: '0755'
+
+    - name: Configurar registries.yaml con mirror del laboratorio
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/registries.yaml
+        content: |
+          mirrors:
+            "docker.io":
+              endpoint:
+                - "http://{{ registry_url }}"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Configurar config.yaml para relajar umbrales de desalojo (disk-pressure)
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml
+        content: |
+          kubelet-arg:
+            - "eviction-hard=memory.available<100Mi,nodefs.available<2%,nodefs.inodesFree<2%"
+            - "image-gc-high-threshold=95"
+            - "image-gc-low-threshold=90"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reiniciar k3s
+
+    - name: Configurar sistema (SELinux y Firewalld)
+      ansible.builtin.shell: |
+        setenforce 0
+        systemctl stop firewalld && systemctl disable firewalld
+      changed_when: false
+
+  handlers:
+    - name: Reiniciar k3s
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: restarted
+      loop:
+        - k3s
+        - k3s-agent
+      failed_when: false # Ignora error si uno de los dos servicios no existe en el nodo
