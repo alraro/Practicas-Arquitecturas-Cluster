@@ -1,0 +1,75 @@
+---
+- name: Configurar Docker Engine y Docker Registry
+  hosts: compute_nodes
+  become: true
+  vars:
+    proxy_url: "dockreg.aclus.ac.uma.es:5000"
+
+  tasks:
+
+    - name: Crear el directorio de configuración de Docker
+      ansible.builtin.file:
+        path: /etc/docker
+        state: directory
+        mode: '0755'
+
+    - name: Configurar daemon.json con mirror e insecure-registry
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        content: |
+          {
+          "registry-mirrors": ["http://{{ proxy_url }}"],
+          "insecure-registries": ["{{ proxy_url }}"]
+          }
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reiniciar Docker
+
+    - name: Asegurar que Docker está iniciado y habilitado
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Desactivar tx offload en caliente
+      ansible.builtin.command: ethtool -K ens33 tx off
+      register: ethtool_result
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Crear servicio systemd para hacer el cambio persistente
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/disable-tx-offload.service
+        content: |
+          [Unit]
+          Description=Disable TX offload on ens33 for Docker Swarm VMware bug
+
+          After=network.target
+          Before=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/sbin/ethtool -K ens33 tx off
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reload systemd and enable service
+
+  handlers:
+
+    - name: Reiniciar Docker
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted
+
+    - name: Reload systemd and enable service
+      ansible.builtin.systemd:
+        daemon_reload: yes
+        name: disable-tx-offload.service
+        enabled: yes
+        state: started
