@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitea-db
+  namespace: gitea
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gitea-db
+  template:
+    metadata:
+      labels:
+        app: gitea-db
+    spec:
+      containers:
+        - name: mariadb
+          image: mariadb:10.11
+          args: ["--skip-name-resolve", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+          env:
+          - name: MARIADB_ROOT_HOST
+            value: "%"
+          envFrom:
+          - secretRef:
+              name: gitea-db-secret
+          resources:
+            limits:
+              cpu: "750m"
+              memory: "1024Mi"
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+          - name: db-storage
+            mountPath: /var/lib/mysql
+          readinessProbe:
+            exec:
+              command:
+              - sh
+              - -c
+              - "mysqladmin ping -u root -p$MYSQL_ROOT_PASSWORD"
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 6
+      volumes:
+      - name: db-storage
+        persistentVolumeClaim:
+          claimName: gitea-db-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitea-db
+  namespace: gitea
+spec:
+  selector:
+    app: gitea-db
+  ports:
+  - port: 3306
+    targetPort: 3306
+  type: ClusterIP
