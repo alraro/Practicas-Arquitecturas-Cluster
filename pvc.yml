@@ -1,0 +1,28 @@
+# Archivo ~/gitea/pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitea-db-pvc
+  namespace: gitea
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: manual
+  resources:
+    requests:
+      storage: 1Gi
+  volumeName: gitea-db-pv
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitea-data-pvc
+  namespace: gitea
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: manual
+  resources:
+    requests:
+      storage: 1Gi
+  volumeName: gitea-data-pv
