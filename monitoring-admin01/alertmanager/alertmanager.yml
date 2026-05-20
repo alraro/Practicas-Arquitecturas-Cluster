@@ -1,0 +1,33 @@
+# Archivo ~/monitoring/alertmanager/alertmanager.yml
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'instance']
+  group_wait: 30s # Espera antes de enviar el primer grupo
+  group_interval: 5m # Intervalo entre notificaciones del mismo grupo
+  repeat_interval: 4h # Reenvío si la alerta sigue activa
+  receiver: default
+  routes:
+    - matchers:
+        - severity = critical
+      receiver: critical
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: 'http://localhost:5001/' # Webhook de prueba, sin notificación real
+        send_resolved: true
+
+  - name: critical
+    webhook_configs:
+      - url: 'http://localhost:5001/'
+        send_resolved: true
+
+inhibit_rules:
+  # Si un nodo está caído, inhibimos las alertas secundarias de ese nodo
+  - source_matchers:
+      - alertname = NodeDown
+    target_matchers:
+      - alertname =~ "HighMemoryUsage|DiskSpaceLow"
+    equal: ['instance']
