@@ -1,0 +1,30 @@
+# Archivo setup_docker_metrics.yml
+---
+- name: Habilitar métricas del daemon Docker
+  hosts: compute_nodes
+  become: true
+  tasks:
+    - name: Añadir configuración de métricas a daemon.json
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        content: |
+          {
+            "registry-mirrors": [
+              "http://dockreg.aclus.ac.uma.es:5000",
+              "http://dockreg.aclus.ac.uma.es:5002"
+            ],
+            "insecure-registries": [
+              "http://dockreg.aclus.ac.uma.es:5000",
+              "http://dockreg.aclus.ac.uma.es:5002"
+            ],
+            "metrics-addr": "0.0.0.0:9323",
+            "experimental": true
+          }
+        mode: '0644'
+      notify: Reiniciar Docker
+
+  handlers:
+    - name: Reiniciar Docker
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted
