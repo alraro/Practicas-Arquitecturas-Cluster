@@ -1,0 +1,91 @@
+# Archivo setup_monitoring_agents.yml
+---
+# ETAPA 1: Obtener archivos desde admin01 a tu PC local
+- name: Preparar ficheros desde admin01
+  hosts: admin01
+  tasks:
+    - name: Descargar ficheros de configuración
+      ansible.builtin.fetch:
+        src: "~/monitoring/{{ item }}"
+        dest: "./temp_configs/{{ item }}"
+        flat: yes
+      loop:
+        - promtail-config.yml
+        - agents-compose.yml
+
+# ETAPA 2: Configurar Registry, Docker y Agentes en los nodos
+- name: Desplegar infraestructura de monitorización
+  hosts: compute_nodes:storage_nodes
+  become: true
+  vars:
+    monitoring_dir: /root/monitoring
+    proxy_url: "dockreg.aclus.ac.uma.es:5000"
+    proxy_url2: "dockreg.aclus.ac.uma.es:5002"
+
+  tasks:
+      # --- CONFIGURACIÓN DE DOCKER (Registry e Insecure) ---
+    - name: Crear el directorio de configuración de Docker
+      ansible.builtin.file:
+        path: /etc/docker
+        state: directory
+        mode: '0755'
+
+    - name: Configurar daemon.json (Mirror e Insecure Registry)
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        content: |
+          {
+          "registry-mirrors": ["http://{{ proxy_url }}", "http://{{ proxy_url2 }}"],
+          "insecure-registries": ["{{ proxy_url }}", "{{ proxy_url2 }}"]
+          }
+        owner: root
+        group: root
+        mode: '0644'
+      register: docker_config
+
+    - name: Asegurar que Docker esté arrancado y reiniciado si cambió la config
+      ansible.builtin.service:
+        name: docker
+        state: "{{ 'restarted' if docker_config.changed else 'started' }}"
+        enabled: true
+
+    - name: Esperar a que el socket de Docker esté listo
+      ansible.builtin.wait_for:
+        path: /var/run/docker.sock
+        state: present
+        timeout: 15
+
+# --- DESPLIEGUE DE AGENTES ---
+    - name: Crear directorio de trabajo
+      ansible.builtin.file:
+        path: "{{ monitoring_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copiar configuración de Promtail (Template)
+      ansible.builtin.template:
+        src: "./temp_configs/promtail-config.yml"
+        dest: "{{ monitoring_dir }}/promtail-config.yml"
+        mode: '0644'
+
+    - name: Copiar compose de agentes
+      ansible.builtin.copy:
+        src: "./temp_configs/agents-compose.yml"
+        dest: "{{ monitoring_dir }}/docker-compose.yml"
+        mode: '0644'
+
+    - name: Lanzar agentes con Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: "{{ monitoring_dir }}"
+        state: present
+        pull: missing
+
+    - name: Verificar contenedores
+      ansible.builtin.shell:
+        cmd: "docker ps --format {% raw %}'table {{.Names}}\t{{.Status}}'{% endraw %}"
+      register: agent_status
+      changed_when: false
+
+    - name: Mostrar estado
+      ansible.builtin.debug:
+        var: agent_status.stdout_lines
