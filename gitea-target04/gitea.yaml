@@ -1,0 +1,98 @@
+# Archivo ~/gitea/gitea.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitea
+  namespace: gitea
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gitea
+  template:
+    metadata:
+      labels:
+        app: gitea
+    spec:
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+      - name: wait-for-db
+        image: busybox
+        command:
+        - sh
+        - -c
+        - |
+          until nc -z gitea-db 3306; do
+            echo 'Esperando a MariaDB...'
+              sleep 3
+          done
+          echo 'MariaDB disponible, arrancando Gitea'
+      containers:
+      - name: gitea
+        image: gitea/gitea:latest
+        env:
+        - name: GITEA__database__DB_TYPE
+          value: mysql
+        - name: GITEA__database__HOST
+          value: gitea-db:3306
+        - name: GITEA__database__NAME
+          value: gitea
+        - name: GITEA__database__USER
+          value: root
+        - name: GITEA__database__PASSWD
+          value: giteapass
+        - name: GITEA__server__DOMAIN
+          value: gitea.local
+        - name: GITEA__server__SSH_DOMAIN
+          value: gitea.local
+        - name: GITEA__server__ROOT_URL
+          value: http://gitea.local:30300
+        - name: GITEA__server__SSH_PORT
+          value: "30222"
+        ports:
+        - containerPort: 3000
+          name: http
+        - containerPort: 22
+          name: ssh
+        resources:
+          limits:
+            cpu: "750m"
+            memory: "1024Mi"
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+        volumeMounts:
+        - name: gitea-storage
+          mountPath: /data
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: gitea-storage
+        persistentVolumeClaim:
+          claimName: gitea-data-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitea
+  namespace: gitea
+spec:
+  selector:
+    app: gitea
+  ports:
+  - name: http
+    port: 3000
+    targetPort: 3000
+    nodePort: 30300
+  - name: ssh
+    port: 22
+    targetPort: 22
+    nodePort: 30222
+  type: NodePort
