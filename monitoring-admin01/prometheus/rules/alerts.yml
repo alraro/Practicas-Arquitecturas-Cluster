@@ -1,0 +1,57 @@
+# Archivo ~/monitoring/prometheus/rules/alerts.yml
+groups:
+  - name: infrastructure
+    interval: 30s
+    rules:
+
+      # Nodo caído: no se reciben métricas en más de 1 minuto
+      - alert: NodeDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Nodo {{ $labels.instance }} no responde"
+          description: "No se reciben métricas del nodo {{ $labels.instance }} desde hace más de 1 minuto."
+
+      # RAM alta: uso de memoria superior al 85%
+      - alert: HighMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RAM alta en {{ $labels.instance }}"
+          description: "Uso de RAM en {{ $labels.instance }} superior al 85% durante más de 5 minutos."
+
+      # Disco lleno: espacio disponible inferior al 15%
+      - alert: DiskSpaceLow
+        expr: |
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 < 15
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disco casi lleno en {{ $labels.instance }}"
+          description: "Menos del 15% de espacio disponible en {{ $labels.mountpoint }} de {{ $labels.instance }}."
+
+      # Ceph degradado: el clúster no está en estado HEALTH_OK
+      - alert: CephUnhealthy
+        expr: ceph_health_status != 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Clúster Ceph en estado degradado"
+          description: "El clúster Ceph no está en HEALTH_OK. Revisar con: ceph status"
+
+      # Pod de k3s en estado de error
+      - alert: K3sPodFailing
+        expr: kube_pod_status_phase{phase=~"Failed|Unknown"} == 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod {{ $labels.pod }} en estado {{ $labels.phase }}"
+          description: "El pod {{ $labels.namespace }}/{{ $labels.pod }} lleva más de 2 minutos en estado de error."
