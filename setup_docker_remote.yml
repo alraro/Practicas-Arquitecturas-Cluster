@@ -1,0 +1,29 @@
+# Archivo setup_docker_remote.yml
+---
+- name: Habilitar acceso remoto al daemon Docker
+  hosts: client01
+  become: true
+  
+  tasks:
+    - name: Crear directorio override de systemd para Docker
+      ansible.builtin.file:
+        path: /etc/systemd/system/docker.service.d
+        state: directory
+        mode: '0755'
+
+    - name: Configurar Docker para escuchar en TCP
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/docker.service.d/override.conf
+        content: |
+          [Service]
+          ExecStart=
+          ExecStart=/usr/bin/dockerd -H fd:// -H tcp://0.0.0.0:2376
+        mode: '0644'
+      notify: Recargar y reiniciar Docker
+
+  handlers:
+    - name: Recargar y reiniciar Docker
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted
+        daemon_reload: true
