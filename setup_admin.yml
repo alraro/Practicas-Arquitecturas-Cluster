@@ -1,0 +1,35 @@
+# Archivo setup_admin.yml
+---
+- name: Configurar y Habilitar Docker
+  hosts: admin_nodes
+  become: true
+  
+  tasks:
+    - name: Configurar daemon.json (Mirrors e Insecure Registries)
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        content: |
+          {
+            "registry-mirrors": [
+              "http://dockreg.aclus.ac.uma.es:5000",
+              "http://dockreg.aclus.ac.uma.es:5002"
+            ],
+            "insecure-registries": [
+              "dockreg.aclus.ac.uma.es:5000",
+              "dockreg.aclus.ac.uma.es:5002"
+            ]
+          }
+        mode: '0644'
+      notify: Reiniciar Docker
+
+    - name: Asegurar que Docker esté habilitado y arrancado
+      ansible.builtin.systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: Reiniciar Docker
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted
